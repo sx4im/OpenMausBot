@@ -72,6 +72,7 @@ describe("what the app may do", () => {
     ["POST", "/api/bots/bot_123/avatar/generate"],
     ["POST", "/api/bots/bot_123/computer/join"],
     ["POST", "/api/bots/bot_123/secret-cards/message_1/provide"],
+    ["POST", "/api/bots/bot_123/secret-cards/message_1/save"],
     ["POST", "/api/bots/bot_123/computer/control"],
     ["POST", "/api/bots/bot_123/computer/screenshot"],
     ["POST", "/api/bots/bot_123/computer/viewer-close"],
@@ -266,6 +267,12 @@ describe("what it may not", () => {
     expect(allowed("GET", "/api/bots/bot_123/secret-cards/message_1/provide")).toBe(false);
     expect(allowed("POST", "/api/bots/bot_123/secret-cards/message_1/provided")).toBe(false);
     expect(allowed("POST", "/api/bots/bot_123/secret-cards/message_1/provide/extra")).toBe(false);
+  });
+
+  it("lets a paired device save a custom secret typed into its card", () => {
+    expect(allowed("POST", "/api/bots/bot_123/secret-cards/message_1/save")).toBe(true);
+    expect(allowed("GET", "/api/bots/bot_123/secret-cards/message_1/save")).toBe(false);
+    expect(allowed("POST", "/api/bots/bot_123/secret-cards/message_1/save/extra")).toBe(false);
   });
 
   it("allows a path only for the methods it was allowed for", () => {

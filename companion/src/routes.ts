@@ -110,6 +110,11 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // A credential value crosses only as an HPKE envelope, bound to the
   // authenticated device and the exact pending card.
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/secret-cards\/[\w-]+\/provide$/ },
+  // A custom secret (or email sign-in) typed into the card on a paired
+  // device: the host keeps it itself, and still refuses anyone but the
+  // conversation's own person. The host route answers only custom-target
+  // and email cards, never a settings credential.
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/secret-cards\/[\w-]+\/save$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/active-branch$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/compact$/ },
   // Set me up under a new bot's greeting and the x on its chip: no more than a typed /setup.
