@@ -375,3 +375,33 @@ describe("page tools", () => {
       { path: "/api/internal/pages/unpublish", body: { page_id: "abcdefghijklmnopqrstuvwxyz" } }]);
   });
 });
+
+describe("coordinate_bots", () => {
+  async function coordinate(args: Parameters<typeof callTool>[1]) {
+    const calls: Array<{ path: string; body: unknown }> = [];
+    const result = await callTool("coordinate_bots", args, context({
+      client: {
+        api: async (path, init) => {
+          calls.push({ path, body: JSON.parse(String(init?.body)) });
+          return {};
+        },
+        apiResponse: async () => ({ ok: true, status: 200, body: {} }),
+      },
+    }));
+    return { result, calls };
+  }
+
+  it("drops a blank group_id instead of sending it to the internal route", async () => {
+    for (const group_id of ["", "   "]) {
+      const { result, calls } = await coordinate({ bot_ids: ["bot-1"], message: "Do the thing.", group_id });
+      expect(result.isError).toBeFalsy();
+      expect(calls).toEqual([{ path: "/api/internal/coordinate-bots", body: { botIds: ["bot-1"], message: "Do the thing." } }]);
+    }
+  });
+
+  it("still forwards a real group_id, trimmed", async () => {
+    const { result, calls } = await coordinate({ bot_ids: ["bot-1"], message: "Do the thing.", group_id: "  room-1  " });
+    expect(result.isError).toBeFalsy();
+    expect(calls).toEqual([{ path: "/api/internal/coordinate-bots", body: { groupId: "room-1", botIds: ["bot-1"], message: "Do the thing." } }]);
+  });
+});
