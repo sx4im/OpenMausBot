@@ -32,12 +32,12 @@ describe("connectorSetup", () => {
     expect(connectorSetup(cfg({ composio: { apiKey: "ak_live" } }), true)).toBe("ready");
   });
 
-  it("needs setup on a fresh server that has no managed service to wait for", () => {
+  it("needs setup where no managed service waits: a fresh server, and a desktop host without a project key", () => {
     expect(connectorSetup(cfg(), false)).toBe("needs-setup");
     expect(connectorSetup(cfg({ composio: { apiKey: "" } }), false)).toBe("needs-setup");
   });
 
-  it("reports the managed service as unavailable only on a host it comes with (the installed desktop app, a Cloud home)", () => {
+  it("reports the managed service as unavailable only on a Cloud home, which registers itself and retries", () => {
     expect(connectorSetup(cfg(), true)).toBe("service-unavailable");
   });
 });
