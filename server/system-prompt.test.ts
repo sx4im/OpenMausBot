@@ -423,8 +423,12 @@ describe("longCommandsPrompt", () => {
     for (const kind of [null, "local", "vps", "box"] as const) {
       const text = longCommandsPrompt(kind);
       expect(text).toContain("`timeout` in milliseconds, up to 600000");
+      expect(text).toContain("keep the command in the foreground until it exits, so the call ends with a fresh exit and result");
+      expect(text).toContain("Do not detach it with `nohup <command> > /tmp/<job>.log 2>&1 &` on this computer");
+      expect(text).not.toContain("start it detached with its output in a file");
       expect(text).toContain("Never wait inside a command for CI, a deploy or any other job to finish (no sleep loops or repeated polls): check it once");
-      expect(text).toContain("tell the person what you made (with links), set wait_until or a one-time trigger to check back, and end your turn. When the person writes while you work, answer them first.");
+      expect(text).toContain("tell the person what you made (with links). Only set wait_until or a one-time trigger to check back when this turn was started by the person in their own chat with you");
+      expect(text).toContain("work handed to you by a bot, a routine, or an outside event cannot set one up, so stay with the work until it finishes instead of ending your turn. When the person writes while you work, answer them first.");
       expect(text).not.toContain("vm_exec");
     }
     for (const kind of ["vm-private", "vm-shared"] as const) {
