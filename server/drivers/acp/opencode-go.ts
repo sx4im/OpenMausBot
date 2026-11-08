@@ -39,6 +39,9 @@ const paidModels = new Set<string>();
 const DISCOVERY_TIMEOUT_MS = 20_000;
 const EFFORT_SURVEY_MS = 8_000;
 const DISCOVERY_PROBE_TTL_MS = 30_000;
+/** Bound on removing a probe's sessions before the process is killed: an agent without session/delete answers
+ * -32601 at once, a hung one must not stall discovery. */
+const DISCOVERY_SESSION_DELETE_MS = 2_000;
 /** How long a listing OpenCode 2 runs stays open for its own catalog refresh to land (2.2.5 fetched 11 MB in 4 s). */
 const SELF_REFRESH_SETTLE_MS = 10_000;
 const discoveryProbeCache = new Map<string, { expiresAt: number; result: Promise<boolean> }>();
@@ -338,26 +341,49 @@ export async function probeOpenCodeSession(
         child.stdin.write(`${JSON.stringify(message)}\n`);
       } catch {}
     };
+    const probeSessionIds: string[] = [];
+    let spawnFailed = false;
+    const noteProbeSession = (value: unknown) => {
+      const id = (value as { sessionId?: unknown } | null)?.sessionId;
+      if (typeof id === "string" && id && !probeSessionIds.includes(id)) probeSessionIds.push(id);
+    };
+    /** ACP v1's session/delete removes a session from history; session/close only closes it. Best effort:
+     * an agent without the method answers -32601, and a dead process has nothing left to ask. */
+    const deleteProbeSessions = async () => {
+      if (!probeSessionIds.length || child.exitCode !== null || spawnFailed) return;
+      await Promise.all(probeSessionIds.map((sessionId) => new Promise<void>((resolveDelete) => {
+        const id = ++nextId;
+        const deleteTimer = setTimeout(() => { pending.delete(id); resolveDelete(); }, DISCOVERY_SESSION_DELETE_MS);
+        pending.set(id, {
+          resolve: () => { clearTimeout(deleteTimer); resolveDelete(); },
+          reject: () => { clearTimeout(deleteTimer); resolveDelete(); },
+        });
+        write({ jsonrpc: "2.0", id, method: "session/delete", params: { sessionId } });
+      })));
+    };
     const finish = (error: Error | null, value?: OpenCodeSessionProbe) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      try {
-        child.stdin.end();
-      } catch {}
-      void killCliTree(child);
-      for (const waiter of pending.values()) waiter.reject(new Error("OpenCode closed"));
-      pending.clear();
-      const result = value ?? listed;
-      if (result) resolve(result);
-      else reject(error ?? new Error("OpenCode did not list its models"));
+      void (async () => {
+        await deleteProbeSessions();
+        try {
+          child.stdin.end();
+        } catch {}
+        void killCliTree(child);
+        for (const waiter of pending.values()) waiter.reject(new Error("OpenCode closed"));
+        pending.clear();
+        const result = value ?? listed;
+        if (result) resolve(result);
+        else reject(error ?? new Error("OpenCode did not list its models"));
+      })();
     };
     const timer = setTimeout(
       () => finish(Object.assign(new Error("OpenCode did not list its models in time"), { timedOut: true })),
       timeoutMs,
     );
     timer.unref?.();
-    child.on("error", (error) => finish(error));
+    child.on("error", (error) => { spawnFailed = true; finish(error); });
     child.on("close", (code) => finish(new Error(`OpenCode exited ${code} while listing its models`)));
     child.stderr.resume();
     child.stdout.setEncoding("utf8");
@@ -404,6 +430,7 @@ export async function probeOpenCodeSession(
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
       });
       const session = await request("session/new", { cwd, mcpServers: [] });
+      noteProbeSession(session);
       listed = { session, efforts: new Map() };
       const budget = Math.min(EFFORT_SURVEY_MS, deadline - Date.now() - 1_000);
       const efforts = await surveyOpenCodeEfforts(request, session, budget);
@@ -411,6 +438,7 @@ export async function probeOpenCodeSession(
       const wait = Math.min(settleMs, timeoutMs - 2_000) - (Date.now() - (deadline - timeoutMs));
       if (wait > 0) await new Promise((resolveWait) => setTimeout(resolveWait, wait));
       const later = await request("session/new", { cwd, mcpServers: [] });
+      noteProbeSession(later);
       return { session: catalogFromOpenCodeSession(later) ? later : session, efforts };
     })().then((result) => finish(null, result), (error: Error) => finish(error));
   });
