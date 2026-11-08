@@ -424,11 +424,25 @@ describe("longCommandsPrompt", () => {
       const text = longCommandsPrompt(kind);
       expect(text).toContain("`timeout` in milliseconds, up to 600000");
       expect(text).toContain("Never wait inside a command for CI, a deploy or any other job to finish (no sleep loops or repeated polls): check it once");
-      expect(text).toContain("tell the person what you made (with links), set wait_until or a one-time trigger to check back, and end your turn. When the person writes while you work, answer them first.");
+      expect(text).toContain("tell the person what you made (with links). Only set wait_until or a one-time trigger when this turn can authorize it");
       expect(text).not.toContain("vm_exec");
     }
     for (const kind of ["vm-private", "vm-shared"] as const) {
       expect(longCommandsPrompt(kind)).toContain("vm_exec takes `timeout_seconds` instead (default 60, at most 300)");
+    }
+  });
+
+  it("keeps local long commands in the foreground instead of detaching them with nohup", () => {
+    for (const kind of [null, "local", "vps", "box"] as const) {
+      const text = longCommandsPrompt(kind);
+      expect(text).toContain("keep the command in the foreground until it exits, then do its downstream checks in the same turn");
+      expect(text).toContain("Never detach a local command with `nohup ... &` or any other background launch");
+      expect(text).toContain("a launch exit of 0 or an old output file is not proof the work finished");
+      expect(text).not.toContain("nohup <command>");
+      expect(text).not.toContain("check that file in later calls");
+    }
+    for (const kind of ["vm-private", "vm-shared"] as const) {
+      expect(longCommandsPrompt(kind)).toContain("start anything longer detached inside the VM with its output in a file (`nohup <command> > /tmp/<job>.log 2>&1 &`)");
     }
   });
 });
