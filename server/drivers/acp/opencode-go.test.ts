@@ -23,6 +23,7 @@ import {
   openMausOwnsWorkingFolder,
   parseOpenCodeModelsOutput,
   preferredOpenCodeModel,
+  probeOpenCodeSession,
   resetOpenCodeModelCache,
   setOpenCodeProviderKeyPolicy,
   surveyOpenCodeEfforts,
@@ -954,6 +955,79 @@ describe("OpenCode catalog probes", () => {
       resetOpenCodeModelCache();
       await discoverOpenCodeModels({ ...process.env, HOME: scratch, FAKE_ACP_MODELS: "opencode/big-pickle" }, FAKE_CLI);
       expect(execFileSync("git", ["rev-list", "--max-parents=0", "HEAD"], { cwd: folder, encoding: "utf8" }).trim()).toBe(root);
+    } finally {
+      await removeTempDir(scratch);
+    }
+  });
+
+  const rpcEntries = (rpc: string) => readFileSync(rpc, "utf8").trim().split("\n")
+    .map((line) => JSON.parse(line) as { method: string; sessionId?: string });
+
+  it("deletes the session its probe created", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-probe-cleanup-"));
+    try {
+      const rpc = join(scratch, "rpc.jsonl");
+      const probe = await probeOpenCodeSession(FAKE_CLI, { ...process.env, HOME: scratch, FAKE_ACP_MODELS: "opencode/big-pickle", FAKE_ACP_RPC_APPEND_FILE: rpc }, scratch);
+      expect((probe.session as { sessionId?: unknown }).sessionId).toBe("fake-acp-session");
+      const entries = rpcEntries(rpc);
+      expect(entries.filter((entry) => entry.method === "session/new")).toHaveLength(1);
+      expect(entries.filter((entry) => entry.method === "session/delete").map((entry) => entry.sessionId))
+        .toEqual(["fake-acp-session"]);
+      // The delete runs only once the probe process has exited, so it comes after every probe request.
+      expect(entries.map((entry) => entry.method).at(-1)).toBe("session/delete");
+    } finally {
+      await removeTempDir(scratch);
+    }
+  });
+
+  it("deletes both sessions when the catalog settles", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-probe-cleanup-settle-"));
+    try {
+      const rpc = join(scratch, "rpc.jsonl");
+      const probe = await probeOpenCodeSession(FAKE_CLI, { ...process.env, HOME: scratch, FAKE_ACP_MODELS: "opencode/big-pickle", FAKE_ACP_RPC_APPEND_FILE: rpc }, scratch, 20_000, 500);
+      expect((probe.session as { sessionId?: unknown }).sessionId).toBe("fake-acp-session-2");
+      const entries = rpcEntries(rpc);
+      expect(entries.filter((entry) => entry.method === "session/new")).toHaveLength(2);
+      // The deletes run in parallel, so their order in the log is not fixed; both ids must be there.
+      expect(entries.filter((entry) => entry.method === "session/delete").map((entry) => entry.sessionId).sort())
+        .toEqual(["fake-acp-session", "fake-acp-session-2"]);
+    } finally {
+      await removeTempDir(scratch);
+    }
+  });
+
+  it("still deletes the session when the probe process dies mid-survey", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-probe-cleanup-error-"));
+    try {
+      const rpc = join(scratch, "rpc.jsonl");
+      // The probe resolves with the already-listed session when the child dies during the
+      // effort survey; the session it created still has to be deleted.
+      const probe = await probeOpenCodeSession(FAKE_CLI, {
+        ...process.env, HOME: scratch, FAKE_ACP_MODELS: "opencode/big-pickle",
+        FAKE_ACP_EXIT_ON_MODEL: "opencode/big-pickle", FAKE_ACP_RPC_APPEND_FILE: rpc,
+      }, scratch);
+      expect((probe.session as { sessionId?: unknown }).sessionId).toBe("fake-acp-session");
+      const entries = rpcEntries(rpc);
+      expect(entries.filter((entry) => entry.method === "session/new")).toHaveLength(1);
+      expect(entries.filter((entry) => entry.method === "session/delete").map((entry) => entry.sessionId))
+        .toEqual(["fake-acp-session"]);
+    } finally {
+      await removeTempDir(scratch);
+    }
+  });
+
+  it("still lists its models when the session delete fails", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-probe-cleanup-delete-fails-"));
+    try {
+      const rpc = join(scratch, "rpc.jsonl");
+      const probe = await probeOpenCodeSession(FAKE_CLI, {
+        ...process.env, HOME: scratch, FAKE_ACP_MODELS: "opencode/big-pickle",
+        FAKE_ACP_SESSION_DELETE_EXIT: "1", FAKE_ACP_RPC_APPEND_FILE: rpc,
+      }, scratch);
+      expect((probe.session as { sessionId?: unknown }).sessionId).toBe("fake-acp-session");
+      const entries = rpcEntries(rpc);
+      expect(entries.filter((entry) => entry.method === "session/delete").map((entry) => entry.sessionId))
+        .toEqual(["fake-acp-session"]);
     } finally {
       await removeTempDir(scratch);
     }

@@ -309,6 +309,20 @@ export function surveyOpenCodeEfforts(
   return surveyModelVariants(request, session, budgetMs);
 }
 
+/** Best-effort removal of one probe session: OpenCode persists every `session/new` in the
+ * discovery workspace, and killing the probe process does not remove it. An older CLI without
+ * the `session delete` subcommand just fails here; that must never fail the listing. */
+function deleteOpenCodeSession(
+  cli: string,
+  environment: Record<string, string | undefined>,
+  cwd: string,
+  sessionId: string,
+): Promise<void> {
+  return new Promise((resolve) => {
+    execCli(cli, ["session", "delete", sessionId], { cwd, timeout: 10_000, env: environment }, () => resolve());
+  });
+}
+
 /** `settleMs` keeps the process open that long after it starts, then lists again: OpenCode 2's own catalog refresh
  * reaches a running process's later sessions only. */
 export async function probeOpenCodeSession(
@@ -333,6 +347,11 @@ export async function probeOpenCodeSession(
     let buffer = "";
     let nextId = 0;
     const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+    const probeSessionIds: string[] = [];
+    const noteProbeSession = (value: unknown) => {
+      const sessionId = (value as { sessionId?: unknown } | null)?.sessionId;
+      if (typeof sessionId === "string" && sessionId && !probeSessionIds.includes(sessionId)) probeSessionIds.push(sessionId);
+    };
     const write = (message: unknown) => {
       try {
         child.stdin.write(`${JSON.stringify(message)}\n`);
@@ -342,15 +361,23 @@ export async function probeOpenCodeSession(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      try {
-        child.stdin.end();
-      } catch {}
-      void killCliTree(child);
       for (const waiter of pending.values()) waiter.reject(new Error("OpenCode closed"));
       pending.clear();
       const result = value ?? listed;
-      if (result) resolve(result);
-      else reject(error ?? new Error("OpenCode did not list its models"));
+      void (async () => {
+        try {
+          child.stdin.end();
+        } catch {}
+        try {
+          await killCliTree(child, 2_000);
+        } catch {}
+        // The probe's sessions persist in the discovery workspace after the process dies, so
+        // remove each one before resolving; a CLI without `session delete` just fails the
+        // delete, never the listing.
+        await Promise.allSettled(probeSessionIds.map((sessionId) => deleteOpenCodeSession(cli, environment, cwd, sessionId)));
+        if (result) resolve(result);
+        else reject(error ?? new Error("OpenCode did not list its models"));
+      })();
     };
     const timer = setTimeout(
       () => finish(Object.assign(new Error("OpenCode did not list its models in time"), { timedOut: true })),
@@ -404,6 +431,7 @@ export async function probeOpenCodeSession(
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
       });
       const session = await request("session/new", { cwd, mcpServers: [] });
+      noteProbeSession(session);
       listed = { session, efforts: new Map() };
       const budget = Math.min(EFFORT_SURVEY_MS, deadline - Date.now() - 1_000);
       const efforts = await surveyOpenCodeEfforts(request, session, budget);
@@ -411,6 +439,7 @@ export async function probeOpenCodeSession(
       const wait = Math.min(settleMs, timeoutMs - 2_000) - (Date.now() - (deadline - timeoutMs));
       if (wait > 0) await new Promise((resolveWait) => setTimeout(resolveWait, wait));
       const later = await request("session/new", { cwd, mcpServers: [] });
+      noteProbeSession(later);
       return { session: catalogFromOpenCodeSession(later) ? later : session, efforts };
     })().then((result) => finish(null, result), (error: Error) => finish(error));
   });

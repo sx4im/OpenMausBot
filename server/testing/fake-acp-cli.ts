@@ -32,6 +32,8 @@
 //   FAKE_ACP_VERSION  what `--version` prints (default "fake-acp 1.0.0"); a CLI the driver checks the shape of needs its own
 //   FAKE_ACP_RPC_DUMP  this process's method list, rewritten after every request
 //   FAKE_ACP_RPC_APPEND_FILE  one {"pid","method","cwd"} line appended per request
+//   FAKE_ACP_SESSION_DELETE_EXIT  exit code for `session delete` (default 0); a `session delete`
+//     run also appends a {"method":"session/delete","sessionId"} line to FAKE_ACP_RPC_APPEND_FILE
 //   FAKE_ACP_RPC_FAILURE_FILE  JSON-RPC error for session/prompt; once read the process stays poisoned
 //   FAKE_ACP_RPC_FAILURE_METHOD  initialize, session/new or session/prompt (default)
 //   FAKE_ACP_RPC_FAILURE_GATE  hold the error until this file exists
@@ -379,6 +381,17 @@ if (argv[0] === "models" || argv.includes("--list-models")) {
     ].join("\n"),
   );
   process.exit(0);
+}
+
+// `opencode session delete <id>` removes a persisted session, like the real CLI: record it the
+// way probe requests are recorded so tests can see which sessions a probe cleaned up.
+if (argv[0] === "session" && argv[1] === "delete") {
+  if (process.env.FAKE_ACP_RPC_APPEND_FILE) {
+    try {
+      appendFileSync(process.env.FAKE_ACP_RPC_APPEND_FILE, JSON.stringify({ pid: process.pid, method: "session/delete", cwd: process.cwd(), sessionId: argv[2] }) + "\n");
+    } catch {}
+  }
+  process.exit(Number(process.env.FAKE_ACP_SESSION_DELETE_EXIT ?? 0));
 }
 
 // ACP names the session in every update and request: the one whose request this answers, or the live one.
