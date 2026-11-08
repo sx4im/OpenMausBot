@@ -314,6 +314,13 @@ if (argv[0] === "status" || argv[0] === "whoami") {
   console.log(JSON.stringify({ isAuthenticated: authenticated }));
   process.exit(0);
 }
+// OpenCode deletes a session with `session delete <id>`; record the call in the same shape as an ACP method.
+if (argv[0] === "session" && argv[1] === "delete" && typeof argv[2] === "string") {
+  if (process.env.FAKE_ACP_RPC_APPEND_FILE) {
+    appendFileSync(process.env.FAKE_ACP_RPC_APPEND_FILE, JSON.stringify({ pid: process.pid, method: "session delete", cwd: process.cwd(), sessionId: argv[2] }) + "\n");
+  }
+  process.exit(0);
+}
 const catalogLock = process.env.FAKE_ACP_MODELS_LOCK;
 if (catalogLock && (argv[0] === "models" || argv[0] === "acp") && !argv.includes("--refresh") && process.env.OPENCODE_DISABLE_MODELS_FETCH !== "1") {
   writeFileSync(catalogLock, String(process.pid));

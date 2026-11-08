@@ -309,6 +309,25 @@ export function surveyOpenCodeEfforts(
   return surveyModelVariants(request, session, budgetMs);
 }
 
+// `opencode session delete` removes a session and its data.
+async function forgetOpenCodeDiscoverySessions(
+  cli: string,
+  environment: Record<string, string | undefined>,
+  cwd: string,
+  sessionIds: readonly string[],
+): Promise<void> {
+  for (const sessionId of sessionIds) {
+    if (!/^[\w-]{1,128}$/.test(sessionId)) continue;
+    await new Promise<void>((resolveDelete) => {
+      try {
+        execCli(cli, ["session", "delete", sessionId], { cwd, env: environment, timeout: 10_000 }, () => resolveDelete());
+      } catch {
+        resolveDelete();
+      }
+    });
+  }
+}
+
 /** `settleMs` keeps the process open that long after it starts, then lists again: OpenCode 2's own catalog refresh
  * reaches a running process's later sessions only. */
 export async function probeOpenCodeSession(
@@ -330,6 +349,11 @@ export async function probeOpenCodeSession(
     }
     let settled = false;
     let listed: OpenCodeSessionProbe | undefined;
+    const sessionIds: string[] = [];
+    const trackSession = (result: unknown) => {
+      const sessionId = (result as { sessionId?: unknown } | null)?.sessionId;
+      if (typeof sessionId === "string" && sessionId.length > 0 && !sessionIds.includes(sessionId)) sessionIds.push(sessionId);
+    };
     let buffer = "";
     let nextId = 0;
     const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
@@ -345,12 +369,23 @@ export async function probeOpenCodeSession(
       try {
         child.stdin.end();
       } catch {}
-      void killCliTree(child);
       for (const waiter of pending.values()) waiter.reject(new Error("OpenCode closed"));
       pending.clear();
       const result = value ?? listed;
-      if (result) resolve(result);
-      else reject(error ?? new Error("OpenCode did not list its models"));
+      void (async () => {
+        try {
+          await killCliTree(child);
+        } catch {
+          // Ignore; killing the probe is not the result.
+        }
+        try {
+          await forgetOpenCodeDiscoverySessions(cli, environment, cwd, sessionIds);
+        } catch {
+          // Ignore; the catalog is the result, not the cleanup.
+        }
+        if (result) resolve(result);
+        else reject(error ?? new Error("OpenCode did not list its models"));
+      })();
     };
     const timer = setTimeout(
       () => finish(Object.assign(new Error("OpenCode did not list its models in time"), { timedOut: true })),
@@ -404,6 +439,7 @@ export async function probeOpenCodeSession(
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
       });
       const session = await request("session/new", { cwd, mcpServers: [] });
+      trackSession(session);
       listed = { session, efforts: new Map() };
       const budget = Math.min(EFFORT_SURVEY_MS, deadline - Date.now() - 1_000);
       const efforts = await surveyOpenCodeEfforts(request, session, budget);
@@ -411,6 +447,7 @@ export async function probeOpenCodeSession(
       const wait = Math.min(settleMs, timeoutMs - 2_000) - (Date.now() - (deadline - timeoutMs));
       if (wait > 0) await new Promise((resolveWait) => setTimeout(resolveWait, wait));
       const later = await request("session/new", { cwd, mcpServers: [] });
+      trackSession(later);
       return { session: catalogFromOpenCodeSession(later) ? later : session, efforts };
     })().then((result) => finish(null, result), (error: Error) => finish(error));
   });

@@ -23,6 +23,7 @@ import {
   openMausOwnsWorkingFolder,
   parseOpenCodeModelsOutput,
   preferredOpenCodeModel,
+  probeOpenCodeSession,
   resetOpenCodeModelCache,
   setOpenCodeProviderKeyPolicy,
   surveyOpenCodeEfforts,
@@ -954,6 +955,59 @@ describe("OpenCode catalog probes", () => {
       resetOpenCodeModelCache();
       await discoverOpenCodeModels({ ...process.env, HOME: scratch, FAKE_ACP_MODELS: "opencode/big-pickle" }, FAKE_CLI);
       expect(execFileSync("git", ["rev-list", "--max-parents=0", "HEAD"], { cwd: folder, encoding: "utf8" }).trim()).toBe(root);
+    } finally {
+      await removeTempDir(scratch);
+    }
+  });
+
+  const deletedSessions = (rpc: string) => readFileSync(rpc, "utf8").trim().split("\n")
+    .map((line) => JSON.parse(line) as { method: string; sessionId?: string })
+    .filter((entry) => entry.method === "session delete")
+    .map((entry) => entry.sessionId);
+
+  it("deletes the probe session once discovery finishes", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-probe-delete-"));
+    try {
+      const rpc = join(scratch, "rpc.jsonl");
+      const found = await discoverOpenCodeModels({
+        ...process.env, HOME: scratch, FAKE_ACP_MODELS: "opencode/big-pickle,github-copilot/gpt-5.3-codex",
+        FAKE_ACP_RPC_APPEND_FILE: rpc,
+      }, FAKE_CLI);
+      expect(found.options.map((option) => option.id)).toEqual(["opencode/big-pickle", "github-copilot/gpt-5.3-codex"]);
+      expect(deletedSessions(rpc)).toEqual(["fake-acp-session"]);
+    } finally {
+      await removeTempDir(scratch);
+    }
+  });
+
+  it("deletes both sessions when discovery settles for a refresh", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-probe-delete-settle-"));
+    try {
+      const rpc = join(scratch, "rpc.jsonl");
+      const found = await discoverOpenCodeModels({
+        ...process.env, HOME: scratch, FAKE_ACP_MODELS_LIST: "v2",
+        FAKE_ACP_MODELS: "opencode/big-pickle,github-copilot/gpt-5.3-codex",
+        FAKE_ACP_RPC_APPEND_FILE: rpc,
+      }, FAKE_CLI, { refresh: true, settleMs: 500 });
+      expect(found.options.map((option) => option.id)).toEqual(["opencode/big-pickle", "github-copilot/gpt-5.3-codex"]);
+      expect(deletedSessions(rpc)).toEqual(["fake-acp-session", "fake-acp-session-2"]);
+    } finally {
+      await removeTempDir(scratch);
+    }
+  });
+
+  it("deletes the probe session even when OpenCode stops mid-survey", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-probe-delete-error-"));
+    try {
+      const rpc = join(scratch, "rpc.jsonl");
+      const folder = join(scratch, "discovery");
+      mkdirSync(folder, { recursive: true });
+      const probe = await probeOpenCodeSession(FAKE_CLI, {
+        ...process.env, HOME: scratch, FAKE_ACP_MODELS: "opencode/big-pickle,github-copilot/gpt-5.3-codex",
+        FAKE_ACP_EXIT_ON_MODEL: "github-copilot/gpt-5.3-codex", FAKE_ACP_RPC_APPEND_FILE: rpc,
+      }, folder);
+      expect(probe.session).toMatchObject({ sessionId: "fake-acp-session" });
+      expect(deletedSessions(rpc)).toEqual(["fake-acp-session"]);
     } finally {
       await removeTempDir(scratch);
     }
