@@ -75,6 +75,17 @@ function desktop() {
       companion = { ...withHosted(), enabled: true };
       account = { ...account, endpoint: HOSTED };
     },
+    withTailscale() {
+      companion = {
+        ...companion,
+        routes: {
+          wifi: { on: false, since: null },
+          relay: { on: false, since: null },
+          tailscale: { on: true, since: null, name: "ada-mac.tail1234.ts.net" },
+          https: { on: false, since: null },
+        },
+      };
+    },
     stopRetrying() {
       account = { available: true, status: "ready", email: "ada@example.com" };
     },
@@ -141,6 +152,23 @@ describe("pairing on a computer that holds no HTTPS address yet", () => {
     expect(fake.bridge.companion.pairing).not.toHaveBeenCalled();
 
     flushSync(() => button("Pair on this Wi-Fi instead")!.click());
+    await vi.waitFor(() => expect(host.querySelector('[aria-label="Device pairing QR code"]')).not.toBeNull());
+    expect(fake.bridge.companion.pairing).toHaveBeenCalledWith(true);
+    expect(fake.bridge.companionAccount.prepare).toHaveBeenCalledOnce();
+  });
+
+  it("offers Tailscale when no address is free and the route is ready", async () => {
+    const fake = desktop();
+    fake.withTailscale();
+    await startPairing(fake);
+    await vi.waitFor(() => expect(fake.bridge.companionAccount.prepare).toHaveBeenCalledOnce());
+
+    fake.finishPrepare("full");
+    await vi.waitFor(() => expect(text()).toContain(FULL));
+    expect(button("Pair using Tailscale")).not.toBeNull();
+    expect(text()).toContain("The other device must be signed in to the same tailnet.");
+
+    flushSync(() => button("Pair using Tailscale")!.click());
     await vi.waitFor(() => expect(host.querySelector('[aria-label="Device pairing QR code"]')).not.toBeNull());
     expect(fake.bridge.companion.pairing).toHaveBeenCalledWith(true);
     expect(fake.bridge.companionAccount.prepare).toHaveBeenCalledOnce();

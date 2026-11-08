@@ -38,6 +38,8 @@ export function PhonePairingQr({ c, signedIn }: { c: PhoneSetupController; signe
   }, [renewing, c]);
   if (!state || !c.pairingLink) return null;
   const lan = state.lan ?? state.addresses?.[0] ?? null;
+  const tailnetName = state.tailnetName
+    ?? (state.routes?.tailscale?.on ? state.routes.tailscale.name ?? null : null);
   const relay = state.e2e?.descriptor?.r?.length ? state.e2e.relay : null;
   const copy = () => {
     void copyText(c.pairingLink ?? "").then(() => {
@@ -53,7 +55,7 @@ export function PhonePairingQr({ c, signedIn }: { c: PhoneSetupController; signe
       <p className="mt-4 text-[13px] text-ink-secondary">{t("phone.code.e2e.scan", { app: productName() })}</p>
       <div className="mt-5 w-full px-2">
         <RouteRow on={Boolean(lan)} label={t("phone.code.e2e.wifi")} value={lan ?? ""} />
-        <RouteRow on={Boolean(state.tailnetName)} label={t("phone.code.e2e.tailscale")} value={state.tailnetName ?? t("phone.code.e2e.tailscaleOff")} />
+        <RouteRow on={Boolean(tailnetName)} label={t("phone.code.e2e.tailscale")} value={tailnetName ?? t("phone.code.e2e.tailscaleOff")} />
         <RouteRow
           on={Boolean(relay)}
           label={t("phone.code.e2e.relay")}

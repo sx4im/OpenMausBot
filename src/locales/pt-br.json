@@ -4304,6 +4304,7 @@
   "phone.signIn.retry": "Tentar o acesso seguro novamente",
   "phone.signIn.or": "ou",
   "phone.signIn.tailnetNote": "O outro dispositivo precisa estar na mesma tailnet.",
+  "phone.signIn.tailscaleInstead": "Parear usando o Tailscale",
   "phone.signIn.wifiInstead": "Parear nesta rede Wi-Fi",
   "phone.signIn.wifiNote": "Os dois dispositivos precisam estar em uma rede que permita que eles se enxerguem.",
   "phone.verifying.local": "Preparando seu código de pareamento",
