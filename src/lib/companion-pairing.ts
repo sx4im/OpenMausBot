@@ -9,6 +9,8 @@ export interface CompanionPairingRouteSource {
   addresses?: string[];
   tailscale?: string;
   tailnetName?: string;
+  /** The routes the person turned on in Settings, with the MagicDNS name Tailscale reported. */
+  routes?: { tailscale?: { on: boolean; since?: number | null; name?: string | null } };
   lan?: string | null;
   hosts?: string[];
   endpoints?: CompanionEndpoint[];
@@ -92,6 +94,19 @@ export function companionPairingRoute(
         kind: "tailnet",
         priority: 0,
       }])[0] ?? null;
+    }
+    // Settings can show Tailscale ready while the sidecar never learned the
+    // MagicDNS name: the enabled route's name is the same name, so it is a
+    // valid tailnet fallback too — but only while the route is on.
+    if (!preferred && source.routes?.tailscale?.on) {
+      const routeName = source.routes.tailscale.name?.trim();
+      if (routeName) {
+        preferred = qrEndpoints([{
+          url: directHTTPOrigin(routeName, source.port),
+          kind: "tailnet",
+          priority: 0,
+        }])[0] ?? null;
+      }
     }
     if (!preferred) return null;
 
@@ -192,12 +207,23 @@ export function companionPairingRoutePin(
 
 /** No silent substitution of another protected endpoint: a new transport needs a fresh pairing credential. */
 export function companionPairingRoutePinAvailable(
-  source: Pick<CompanionPairingRouteSource, "endpoints">,
+  source: CompanionPairingRouteSource,
   pin: CompanionPairingRoutePin,
 ): boolean {
   if (!pin.protectedEndpoint) return true;
-  return qrEndpoints(source.endpoints).some(
+  if (qrEndpoints(source.endpoints).some(
     (endpoint) => endpoint.kind === pin.protectedEndpoint?.kind
       && endpoint.url === pin.protectedEndpoint.url,
-  );
+  )) return true;
+  // A tailnet pin issued from a reported name (tailnetName, or the enabled
+  // Tailscale route's name) has no advertised endpoint to match: it stays
+  // valid while that name still resolves to the same tailnet endpoint, and
+  // drops the moment the name changes or the route turns off.
+  if (pin.protectedEndpoint.kind === "tailnet") {
+    const route = companionPairingRoute(source, "tailscale");
+    return route?.endpoints?.some(
+      (endpoint) => endpoint.url === pin.protectedEndpoint?.url,
+    ) ?? false;
+  }
+  return false;
 }

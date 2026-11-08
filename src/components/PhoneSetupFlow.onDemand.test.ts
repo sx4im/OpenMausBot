@@ -75,6 +75,17 @@ function desktop() {
       companion = { ...withHosted(), enabled: true };
       account = { ...account, endpoint: HOSTED };
     },
+    withTailscale() {
+      companion = {
+        ...companion,
+        routes: {
+          wifi: { on: true, since: null },
+          relay: { on: false, since: null },
+          tailscale: { on: true, since: null, name: "mac.tail1234.ts.net" },
+          https: { on: false, since: null },
+        },
+      };
+    },
     stopRetrying() {
       account = { available: true, status: "ready", email: "ada@example.com" };
     },
@@ -141,6 +152,26 @@ describe("pairing on a computer that holds no HTTPS address yet", () => {
     expect(fake.bridge.companion.pairing).not.toHaveBeenCalled();
 
     flushSync(() => button("Pair on this Wi-Fi instead")!.click());
+    await vi.waitFor(() => expect(host.querySelector('[aria-label="Device pairing QR code"]')).not.toBeNull());
+    expect(fake.bridge.companion.pairing).toHaveBeenCalledWith(true);
+    expect(fake.bridge.companionAccount.prepare).toHaveBeenCalledOnce();
+  });
+
+  it("offers Tailscale when it is ready and hosted links are full, and opens its QR", async () => {
+    const fake = desktop();
+    fake.withTailscale();
+    await startPairing(fake);
+    await vi.waitFor(() => expect(fake.bridge.companionAccount.prepare).toHaveBeenCalledOnce());
+
+    fake.finishPrepare("full");
+    await vi.waitFor(() => expect(text()).toContain(FULL));
+    expect(text()).toContain("Secure access needs attention");
+    expect(button("Try secure access again")).not.toBeNull();
+    expect(button("Pair on this Wi-Fi instead")).not.toBeNull();
+    expect(button("Pair using Tailscale instead")).not.toBeNull();
+    expect(fake.bridge.companion.pairing).not.toHaveBeenCalled();
+
+    flushSync(() => button("Pair using Tailscale instead")!.click());
     await vi.waitFor(() => expect(host.querySelector('[aria-label="Device pairing QR code"]')).not.toBeNull());
     expect(fake.bridge.companion.pairing).toHaveBeenCalledWith(true);
     expect(fake.bridge.companionAccount.prepare).toHaveBeenCalledOnce();

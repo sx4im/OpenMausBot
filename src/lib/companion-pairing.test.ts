@@ -112,6 +112,7 @@ describe("companionPairingRoute", () => {
     const pin = companionPairingRoutePin(opened, "automatic");
     expect(pin?.protectedEndpoint?.kind).toBe("hosted");
     expect(companionPairingRoutePinAvailable({
+      port: 8810,
       endpoints: [opened.endpoints[1]],
     }, pin!)).toBe(false);
   });
@@ -188,6 +189,74 @@ describe("companionPairingRoute", () => {
       { url: "https://device.openmausbot.com", kind: "hosted", priority: 100 },
     ]);
     expect(new URL(link!).searchParams.get("hosts")).toBe("mac.tail1234.ts.net");
+  });
+
+  it("uses the enabled Tailscale route name when no tailnet endpoint or tailnetName is advertised", () => {
+    const source = {
+      port: 8810,
+      routes: { tailscale: { on: true, since: null, name: "mac.tail1234.ts.net" } },
+      hosts: ["mac.tail1234.ts.net"],
+      endpoints: [],
+    };
+    const route = companionPairingRoute(source, "tailscale");
+
+    expect(route).toMatchObject({
+      address: "mac.tail1234.ts.net",
+      port: 8810,
+      hosts: ["mac.tail1234.ts.net"],
+    });
+    expect(companionPairingRoutePin(source, "tailscale")?.protectedEndpoint?.kind).toBe("tailnet");
+  });
+
+  it("ignores the Tailscale route name when the route is off", () => {
+    expect(companionPairingRoute({
+      port: 8810,
+      routes: { tailscale: { on: false, since: null, name: "mac.tail1234.ts.net" } },
+      endpoints: [],
+    }, "tailscale")).toBeNull();
+  });
+
+  it("refuses a Tailscale route name that is not a MagicDNS ts.net name", () => {
+    expect(companionPairingRoute({
+      port: 8810,
+      routes: { tailscale: { on: true, since: null, name: "attacker.example" } },
+      endpoints: [],
+    }, "tailscale")).toBeNull();
+  });
+
+  it("keeps a Tailscale pin issued from the route name while the name still resolves", () => {
+    const opened = {
+      port: 8810,
+      routes: { tailscale: { on: true, since: null, name: "mac.tail1234.ts.net" } },
+      hosts: ["mac.tail1234.ts.net"],
+      endpoints: [],
+    };
+    const pin = companionPairingRoutePin(opened, "tailscale");
+    expect(pin?.protectedEndpoint?.kind).toBe("tailnet");
+    expect(companionPairingRoutePinAvailable(opened, pin!)).toBe(true);
+
+    const renamed = {
+      ...opened,
+      routes: { tailscale: { on: true, since: null, name: "other.tail1234.ts.net" } },
+    };
+    expect(companionPairingRoutePinAvailable(renamed, pin!)).toBe(false);
+    const switchedOff = {
+      ...opened,
+      routes: { tailscale: { on: false, since: null, name: "mac.tail1234.ts.net" } },
+    };
+    expect(companionPairingRoutePinAvailable(switchedOff, pin!)).toBe(false);
+  });
+
+  it("keeps a Tailscale pin issued from tailnetName while the name still resolves", () => {
+    const opened = {
+      port: 8810,
+      tailnetName: "mac.tail1234.ts.net",
+      endpoints: [],
+    };
+    const pin = companionPairingRoutePin(opened, "tailscale");
+    expect(pin?.protectedEndpoint?.kind).toBe("tailnet");
+    expect(companionPairingRoutePinAvailable(opened, pin!)).toBe(true);
+    expect(companionPairingRoutePinAvailable({ ...opened, tailnetName: "other.tail1234.ts.net" }, pin!)).toBe(false);
   });
 
   it("refuses a Tailscale label that is not a MagicDNS ts.net name", () => {

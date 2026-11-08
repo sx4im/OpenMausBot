@@ -4554,6 +4554,7 @@
   "phone.signIn.retry": "Try secure access again",
   "phone.signIn.or": "or",
   "phone.signIn.tailnetNote": "The other device must be signed in to the same tailnet.",
+  "phone.signIn.tailscaleInstead": "Pair using Tailscale instead",
   "phone.signIn.wifiInstead": "Pair on this Wi-Fi instead",
   "phone.signIn.wifiNote": "Both devices must be on a network that lets them see each other.",
   "phone.verifying.local": "Preparing your pairing code",

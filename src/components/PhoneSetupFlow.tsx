@@ -14,6 +14,7 @@ import {
   Check,
   Loader2,
   Mail,
+  Network,
   QrCode,
   ShieldCheck,
   Smartphone,
@@ -990,6 +991,20 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
         <p className="mt-2 text-center text-[11px] leading-relaxed text-ink-secondary">
           {t("phone.signIn.wifiNote")}
         </p>
+        {c.tailscaleAvailable && (
+          <>
+            <button
+              disabled={c.busy || c.accountBusy}
+              onClick={c.useTailscale}
+              className="mt-3 flex items-center justify-center gap-2 rounded-lg border border-hairline/50 py-2.5 text-[13px] text-ink hover:bg-control disabled:opacity-40"
+            >
+              <Network size={15} /> {t("phone.signIn.tailscaleInstead")}
+            </button>
+            <p className="mt-2 text-center text-[11px] leading-relaxed text-ink-secondary">
+              {t("phone.signIn.tailnetNote")}
+            </p>
+          </>
+        )}
       </div>
     );
   }
