@@ -544,6 +544,36 @@ describe("pressing", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("opens a brief card's routine thread on this device and posts nothing", async () => {
+    const dispatch = vi.fn();
+    const withThreads = { ...store, dispatch, state: { selectedId: "scout", bots: [{ id: "scout", name: "Scout", threadId: "t-main", tasks: [{ threadId: "t-routine", title: "Standup run" }] }], groups: [], config: { features: {}, browserEngine: { kind: "engine" } } } } as unknown as ReturnType<typeof useStore>;
+    const parsed = parseWidgetInput({ type: "Card", title: "Your brief", children: [
+      { type: "Title", value: "Routines" },
+      { type: "Row", gap: 3, align: "center", children: [
+        { type: "Col", flex: 1, children: [{ type: "Text", value: "Standup", weight: "medium" }] },
+        { type: "Button", label: "Open", onClickAction: { type: "open_thread", payload: { botId: "scout", threadId: "t-routine" } } },
+      ] },
+    ] });
+    if (!parsed.ok) throw new Error(parsed.error);
+    act(() => root.render(createElement(BotEditorStore, { value: withThreads, children: createElement(WidgetMessage, { botId: "scout", threadId: "t1", message: row(parsed.value) }) })));
+    await press(button("Open")!);
+    expect(dispatch.mock.calls).toEqual([[{ type: "switchTask", botId: "scout", threadId: "t-routine" }], [{ type: "revealThread", threadId: "t-routine" }]]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("says a thread is gone instead of doing nothing when its Open names one this device does not have", async () => {
+    const dispatch = vi.fn();
+    const withThreads = { ...store, dispatch, state: { selectedId: "scout", bots: [{ id: "scout", name: "Scout", threadId: "t-main", tasks: [] }], groups: [], config: { features: {}, browserEngine: { kind: "engine" } } } } as unknown as ReturnType<typeof useStore>;
+    const parsed = parseWidgetInput({ type: "Card", title: "Your brief", children: [
+      { type: "Button", label: "Open", onClickAction: { type: "open_thread", payload: { botId: "scout", threadId: "t-gone" } } },
+    ] });
+    if (!parsed.ok) throw new Error(parsed.error);
+    act(() => root.render(createElement(BotEditorStore, { value: withThreads, children: createElement(WidgetMessage, { botId: "scout", threadId: "t1", message: row(parsed.value) }) })));
+    await press(button("Open")!);
+    expect(dispatch.mock.calls).toEqual([[{ type: "select", id: "scout" }], [{ type: "revealThread", threadId: "t-gone" }], [{ type: "notice", notice: { kind: "thread-gone", botName: "Scout" } }]]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("opens a published page's open_url in the bot's browser panel in the desktop app, and posts nothing", async () => {
     const PAGE = "https://abcdefghijklmnopqrstuvwxyz.mausbot.page/";
     const dispatch = vi.fn();

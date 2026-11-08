@@ -255,6 +255,9 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const sendId = parseSendId(body.sendId) ?? (phone ? randomUUID() : undefined);
       const press = pressed ? prepareWidgetPress(store, threadId, body.widgetAction, sendId) : null;
       if (press && !press.ok) return json(res, press.status, { error: press.error });
+      // A phone posts every widget press, including one that opens a conversation on the device: answer it with the
+      // conversation, so the phone navigates instead of showing the server's refusal.
+      if (press?.ok && press.navigate) return json(res, 202, { ok: true, threadId, open: press.navigate });
       const answered = press ? serverPress(bot, threadId, press.messageId, press.action, auth) : null;
       if (answered === "handled") return json(res, 202, { ok: true, threadId, handled: true });
       if (answered === "refused") return json(res, 403, userError("serverError.chat.ownerOrAdmin"));

@@ -6,6 +6,7 @@ import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WIDGET_SAMPLES } from "../../shared/widget-samples.ts";
+import { widgetActions } from "../../shared/widget.ts";
 import { createAgentCard } from "../chat-widgets.ts";
 import { DATA_DIR } from "../config.ts";
 import type { ModelSelection } from "../contracts.ts";
@@ -429,6 +430,45 @@ describe("POST /api/bots/:id/messages with widgetAction", () => {
     expect(words.body).toMatchObject({ queued: true });
     expect((await cancelQueued(words.body.queueId)).status).toBe(200);
     expect(row(widgetId).widget!.settled).toMatchObject({ ref: "confirm", label: "Merge the two ready", sendId: SEND });
+  });
+
+  it("answers a phone's Open press with the routine's conversation, and starts no turn", async () => {
+    const { store, bot, threadId, state, post, row, sent } = await fixture();
+    state.fromPhone = true;
+    const run = store.createTask(bot.id, "Standup run")!;
+    const shown = createAgentCard({ store, bot, threadId, input: { tool: "show_widget", widget: {
+      type: "Card", title: "Your brief",
+      children: [{ type: "Row", gap: 3, align: "center", children: [
+        { type: "Col", flex: 1, children: [{ type: "Text", value: "Standup", weight: "medium" }] },
+        { type: "Button", label: "Open", onClickAction: { type: "open_thread", payload: { botId: bot.id, threadId: run.threadId } } },
+      ] }],
+    } } });
+    if (!shown.ok) throw new Error(shown.error);
+    const open = widgetActions(row(shown.messageId).widget!.root).find((entry) => entry.action.type === "open_thread")!;
+    const answer = await post({ threadId, widgetAction: { messageId: shown.messageId, ref: open.ref } });
+    expect(answer).toEqual({ status: 202, body: { ok: true, threadId, open: { botId: bot.id, threadId: run.threadId } } });
+    expect(state.accepted).toEqual([]);
+    expect(state.started).toEqual([]);
+    expect(state.serverPresses).toEqual([]);
+    expect(sent()).toEqual([]);
+    expect(row(shown.messageId).widget!.settled).toBeUndefined();
+    expect(await post({ threadId, widgetAction: { messageId: shown.messageId, ref: open.ref } })).toEqual(answer);
+  });
+
+  it("answers 404 when a phone's Open names a conversation that is gone, and starts no turn", async () => {
+    const { store, bot, threadId, state, post, row, sent } = await fixture();
+    state.fromPhone = true;
+    const shown = createAgentCard({ store, bot, threadId, input: { tool: "show_widget", widget: {
+      type: "Card", title: "Your brief",
+      children: [{ type: "Button", label: "Open", onClickAction: { type: "open_thread", payload: { botId: bot.id, threadId: "thread-gone" } } }],
+    } } });
+    if (!shown.ok) throw new Error(shown.error);
+    const open = widgetActions(row(shown.messageId).widget!.root).find((entry) => entry.action.type === "open_thread")!;
+    expect(await post({ threadId, widgetAction: { messageId: shown.messageId, ref: open.ref } }))
+      .toEqual({ status: 404, body: { error: "That conversation is no longer here." } });
+    expect(state.accepted).toEqual([]);
+    expect(state.started).toEqual([]);
+    expect(sent()).toEqual([]);
   });
 
   it("never reports a typed reply as a press, on the plain, guarded and edit routes, even when its words are a control's label", async () => {

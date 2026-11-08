@@ -1,6 +1,6 @@
 // A bot's widget tree is normalised, scrubbed of secrets and given its text fallback here, once; everything after reads the stored message.
 import {
-  parseWidgetInput, resolveWidgetAction, widgetActions, widgetFields, widgetToText, WIDGET_LIMITS,
+  parseWidgetInput, resolveWidgetAction, threadActionTarget, widgetActions, widgetFields, widgetToText, WIDGET_LIMITS,
   type WidgetAction, type WidgetNode, type WidgetPayload, type WidgetRoot, type WidgetSettled,
 } from "../shared/widget.ts";
 import type { MausColor } from "../shared/wire.ts";
@@ -12,6 +12,7 @@ import type { Message } from "./store.ts";
 
 export interface AgentCardStore {
   groupByThread(threadId: string): unknown;
+  taskByThread(botId: string, threadId: string): unknown;
   messagesFor(threadId: string): Message[];
   appendMessage(threadId: string, message: Omit<Message, "id" | "at">): Message;
   patchMessage(threadId: string, messageId: string, patch: Partial<Message>): Message | null;
@@ -175,6 +176,8 @@ export type WidgetPress =
       action: WidgetAction;
       /** This press folds the widget (confirm, cancel, submit) and has not yet. */
       settles: boolean;
+      /** This press opens a conversation on the device instead of sending anything: the thread to open. */
+      navigate?: { botId: string; threadId: string } | { groupId: string; threadId: string };
       /** Call once the message is accepted, with its `queueId` when it was queued. */
       settle(queueId?: string): void;
     }
@@ -197,10 +200,24 @@ function isRevision(value: unknown): value is number | undefined | null {
   return value === undefined || value === null || (typeof value === "number" && Number.isSafeInteger(value) && value >= 0);
 }
 
+/** The conversation an open_thread press names, from the server's own records: a bot's task, or a room's thread. */
+function openThreadTarget(
+  store: Pick<AgentCardStore, "groupByThread" | "taskByThread">,
+  target: { botId?: string; groupId?: string; threadId: string },
+): { botId: string; threadId: string } | { groupId: string; threadId: string } | undefined {
+  if (target.groupId !== undefined) {
+    const group = store.groupByThread(target.threadId);
+    return isRecord(group) && group.id === target.groupId ? { groupId: target.groupId, threadId: target.threadId } : undefined;
+  }
+  return target.botId !== undefined && store.taskByThread(target.botId, target.threadId)
+    ? { botId: target.botId, threadId: target.threadId }
+    : undefined;
+}
+
 /** Writes nothing until `settle()`. A press on an older `rev` is refused (its ref may now be another button); a retry with
  * the settling press's `sendId` resolves as if still live, and its `settle()` does nothing. */
 export function prepareWidgetPress(
-  store: Pick<AgentCardStore, "messagesFor" | "patchMessage">,
+  store: Pick<AgentCardStore, "groupByThread" | "messagesFor" | "patchMessage" | "taskByThread">,
   threadId: string,
   widgetAction: unknown,
   sendId: string | undefined,
@@ -216,6 +233,13 @@ export function prepareWidgetPress(
   if (!payload?.root) return { ok: false, status: 404, error: "That widget is not in this conversation." };
   const retry = sendId !== undefined && payload.settled?.sendId === sendId;
   if (!retry && !payload.settled && (rev ?? 0) !== (payload.rev ?? 0)) return { ok: false, status: 409, error: STALE_PRESS };
+  const entry = widgetActions(payload.root).find((candidate) => candidate.ref === ref);
+  if (entry?.client && entry.action.type === "open_thread") {
+    const target = threadActionTarget(entry.action);
+    const open = target && openThreadTarget(store, target);
+    if (!open) return { ok: false, status: 404, error: "That conversation is no longer here." };
+    return { ok: true, messageId, text: "", label: entry.label, action: entry.action, settles: false, navigate: open, settle: () => {} };
+  }
   const resolved = resolveWidgetAction(retry ? { v: 1, root: payload.root } : payload, ref, values ?? undefined, other ?? undefined);
   if (!resolved.ok) return resolved;
   const { label, action, tone } = resolved;
