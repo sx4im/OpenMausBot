@@ -44,6 +44,8 @@ describe("service units", () => {
     expect(plist).toContain("<string>maus.example.com</string>");
     expect(plist).toContain("<key>KeepAlive</key>");
     expect(plist).toContain("/Users/maus/.openmausbot/logs/service.log");
+    expect(plist).toContain("<string>/Users/maus/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>");
+    expect(plist).not.toContain("~/.local/bin");
     expect(launchdPlist({ ...spec, serveArgs: ["--label", "a & b <c>"] })).toContain("<string>a &amp; b &lt;c&gt;</string>");
   });
 
